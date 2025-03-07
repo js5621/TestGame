@@ -1,5 +1,7 @@
+using JetBrains.Annotations;
 using NUnit.Framework;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Experimental.GlobalIllumination; //namespace : 소속(이름이 중복이 많아서)
@@ -11,7 +13,7 @@ public class PlayerManager : MonoBehaviour
     int index = 1;
     int listIndex = 0;
 
-    public float moveSpeed = 5.0f;
+    private float moveSpeed = 5.0f;
     public float mouseSensitivity = 100.0f;
     public Transform cameraTransform;
     public CharacterController characterController;
@@ -26,7 +28,7 @@ public class PlayerManager : MonoBehaviour
     public float zoomFov = 30.0f;//확대 시 카메라 시야각 (1인칭모드에서 사용_
 
     private float currentDistance;//현재 카메라와의 거리(3인칭 모드)
-    private float targerDistance;// 목표 카메라와의 거리
+    private float targetDistance;// 목표 카메라와의 거리
     private float targetFov;//목표 Fov
     private bool isZoomed =false;//확대 여부 확인
     private Coroutine zoomCoroutine;// 코루틴을 사용하여 확대 축소 처리
@@ -43,56 +45,42 @@ public class PlayerManager : MonoBehaviour
     private Vector3 velocity;
     private bool isGround;
  
+    private Animator animator;
+    private float horizontal;
+    private float vertical;
+    bool isRunning = false;
 
+    public float walkSpeed =5.0f;
+    public float runSpeed = 10.0f;
+    public float currentSpeed = 1.0f;
+
+    //사격 
+    private bool isAim =false;
+    private bool isFire = false;
+
+    AudioSource audioSource;
+    public AudioClip audioClipFire;
+    public AudioClip audioClipWeaponChange;
+    public GameObject RifleM4Obj;
 
     void Start()
     {
-        //for (int i = 2; i <=9;i++)
-        //{
-        //    for (int j = 1;j<=9;j++)
-        //    {
-        //        listMultiValue.Add(i*j);
-        //    }
-        //}
-
-        //for (int i=0;i<listMultiValue.Count;i++)
-        //{
-        //    Debug.Log(i.ToString()+":"+listMultiValue[i]);
-        //}
-
-        //listMultiValue.Clear();
-        /*
-        while (dan < 10)
-        {
-            while (index < 10)
-            {
-                listMultiValue.Add(dan * index);
-                index++;
-            }
-            index = 1;
-            dan++;
-        }
-        */
-        /*
-        while (listIndex<listMultiValue.Count)
-        {
-            Debug.Log(listIndex.ToString() + ":" + listMultiValue[listIndex]);
-            
-        }
-        */
-
+       
         Cursor.lockState = CursorLockMode.Locked;
         currentDistance = thirdPersonDistance;
-        targerDistance = thirdPersonDistance;
+        targetDistance = thirdPersonDistance;
         targetFov = defaultFov;
         mainCamera = cameraTransform.GetComponent<Camera>();
         mainCamera.fieldOfView = defaultFov;
+        animator = GetComponent<Animator>();
+        audioSource = GetComponent<AudioSource>();
+       
 
     }
 
-    
 
-    
+
+
     void Update()
     {
         //마우스 입력을 받아 카메라와 플레이어 회전처리
@@ -104,8 +92,8 @@ public class PlayerManager : MonoBehaviour
         pitch = Mathf.Clamp(pitch, -45f, 45f);
 
         isGround = characterController.isGrounded;
-
-        if(isGround&&velocity.y < 0)
+        moveSpeed = isRunning ? runSpeed : walkSpeed;
+        if (isGround&&velocity.y < 0)
         {
 
             velocity.y = -2f;
@@ -123,7 +111,7 @@ public class PlayerManager : MonoBehaviour
             isRotateAroundPlayer= !isRotateAroundPlayer;
             Debug.Log(isRotateAroundPlayer ? "카메라가 주위를 회전합니다." : "플레이어가 시야에 따라서 회전합니다.");
         }
-
+        
         if(isFirstPerson)
         {
             FirstPersonMovement();
@@ -134,17 +122,126 @@ public class PlayerManager : MonoBehaviour
             ThirdPersonMovement();
         }
        
+        if (Input.GetMouseButtonDown(1))
+        {
+                       
+            isAim = true;
+            animator.SetBool("IsAim", isAim);
+            
+            moveSpeed = 0;
+
+            isFire = true;
+            animator.SetBool("IsFire",isFire);
+            if (zoomCoroutine != null)
+            {
+                StopCoroutine(zoomCoroutine); //이미 코루틴이 실행되고있으면 코루틴 멈춤 중복방지
+            }
+
+            if (isFirstPerson)//1인칭 시점 
+            {
+               
+                SetTargetFov(zoomFov);// 카메라의 fov값 변경 
+                zoomCoroutine = StartCoroutine(ZoomFieldOfView(targetFov));
+
+            }
+
+
+            else
+            {
+                
+                SetTargetDistance(zoomDistance);
+                zoomCoroutine = StartCoroutine(ZoomCamera(targetDistance));
+
+            }
+
+        }
+
+        if (Input.GetMouseButtonUp(1))
+        {
+            isAim = false;
+            animator.SetBool("IsAim", isAim);
+
+            isFire = false;
+            animator.SetBool("IsFire", isFire);
+
+            if (zoomCoroutine != null)
+            {
+                StopCoroutine(zoomCoroutine); //이미 코루틴이 실행되고있으면 코루틴 멈춤 중복방지
+            }
+
+            if (isFirstPerson)//1인칭 시점 
+            {
+               
+                SetTargetFov(defaultFov);// 카메라의 fov값 변경 
+                zoomCoroutine = StartCoroutine(ZoomFieldOfView(targetFov));
+
+            }
+
+            else
+            {
+               
+                SetTargetDistance(thirdPersonDistance);
+                zoomCoroutine = StartCoroutine(ZoomCamera(targetDistance));
+
+            }
+
+        }
+
+        if(Input.GetMouseButtonDown(0))
+        {
+            if (isAim)
+            {
+                isFire = true;
+                animator.SetBool("IsFire", isFire);
+                audioSource.PlayOneShot(audioClipFire);
+            }
+        }
+        if(Input.GetMouseButtonUp(0))
+        {
+            if (isAim)
+            {
+                isFire = false;
+                animator.SetBool("IsFire", isFire);
+            }
+        }
+
+        if(Input.GetKey(KeyCode.LeftShift))
+        {
+            isRunning = true;   
+        }
+        else
+        {
+            isRunning =false;
+        }
+
+        if(Input.GetKeyDown(KeyCode.Alpha1))
+        {
+            audioSource.PlayOneShot(audioClipWeaponChange);
+            animator.SetTrigger("IsWeaponChange");
+            RifleM4Obj.SetActive(true);
+        }
+        Debug.Log($"{horizontal}{vertical}");
+        animator.SetFloat("Horizontal", horizontal);
+        
+        animator.SetFloat("Vertical", vertical);
+        animator.SetBool("IsRunning",isRunning);
+        
 
     }
     void FirstPersonMovement()
     {
-        float horizontal = Input.GetAxis("Horizontal");
-        float vertical = Input.GetAxis("Vertical");
-
+        if (!isAim)
+        {
+            horizontal = Input.GetAxis("Horizontal");
+            vertical = Input.GetAxis("Vertical");
+            Vector3 moveDirection = cameraTransform.forward * vertical + cameraTransform.right * horizontal;
+            moveDirection.y = 0;
+            characterController.Move(moveDirection * moveSpeed * Time.deltaTime); //1인칭 설정 시 캐릭터 움직임
+        }
+        
+        
         //
-        Vector3 moveDirection = cameraTransform.forward*vertical+cameraTransform.right*horizontal;
-        moveDirection.y = 0;
-        characterController.Move(moveDirection*moveSpeed*Time.deltaTime); //1인칭 설정 시 캐릭터 움직임
+      
 
         cameraTransform.position = playerHead.transform.position;//1인칭 카메라의 위치 설정     
         cameraTransform.rotation = Quaternion.Euler(pitch,yaw,0);//마우스 회전값으로 카메라 회전 조정
@@ -156,11 +253,14 @@ public class PlayerManager : MonoBehaviour
     void ThirdPersonMovement()
     {
 
-        float horizontal = Input.GetAxis("Horizontal");
-        float vertical = Input.GetAxis("Vertical");
-
-        Vector3 move = transform.right * horizontal + transform.forward * vertical;
-        characterController.Move(move * moveSpeed * Time.deltaTime);
+        if (!isAim)
+        {
+            horizontal = Input.GetAxis("Horizontal");
+            vertical = Input.GetAxis("Vertical");
+            Vector3 move = transform.right * horizontal + transform.forward * vertical;
+            characterController.Move(move * moveSpeed * Time.deltaTime);
+        }
+        
 
         UpdateCameraPosition();
     }
@@ -189,4 +289,41 @@ public class PlayerManager : MonoBehaviour
             cameraTransform.LookAt(playLookObj.position + new Vector3(0, thirdPersonOffset.y, 0));
         }
     }
+    IEnumerator ZoomCamera(float targerDistance)
+    {
+        Debug.Log("ZCCCC");
+        while(Math.Abs(currentDistance -targerDistance)>0.01f)
+        {
+            currentDistance =Mathf.Lerp(currentDistance,targerDistance,Time.deltaTime*zoomSpeed);
+            yield return null;  
+        }
+        currentDistance = targerDistance;
+    }
+    public void SetTargetDistance(float distance)
+    {
+        targetDistance = distance;
+    }
+
+    public void SetTargetFov(float fov)
+    {
+        targetFov = fov;
+    }
+
+
+
+    IEnumerator ZoomFieldOfView(float targerDistance)
+    {
+        Debug.Log("FovScpe1");
+        while (Math.Abs(mainCamera.fieldOfView - targerDistance) > 0.01f)
+        {
+            Debug.Log("FovScpe2");
+            mainCamera.fieldOfView = Mathf.Lerp(mainCamera.fieldOfView, targetFov, Time.deltaTime * zoomSpeed);
+            yield return null;
+        }
+        mainCamera.fieldOfView =targetFov;
+    }
+
+    
+
+
 }
